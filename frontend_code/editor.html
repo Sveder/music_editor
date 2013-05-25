@@ -12,6 +12,8 @@
 	<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.8.18/jquery-ui.min.js"></script>
 	<script src="js/jdataview.js"></script>
 	<script src="js/script.js"></script>
+	<script src="js/riffwave.js"></script>
+
 	
 	<link rel="stylesheet" href="http://code.jquery.com/ui/1.10.3/themes/smoothness/jquery-ui.css">
 	<link rel="stylesheet" href="css/base.css">
@@ -24,7 +26,7 @@
 					<span class="song_title">%%song_title%%</span>\
 					<input type="image" src="img/play.png" class="play_pause_button" onclick="play_index(this, %%song_id%%);"/>\
 \
-					<span class="close_button">X</span>\
+					<button class="close_button">X</button>\
 				</div>\
 \
 				<div class="controls">\
@@ -39,7 +41,14 @@
 			window.AudioContext = window.AudioContext || window.webkitAudioContext;
 			audio_context = new AudioContext();
 
-		  $( "#song_list" ).sortable({distance: 15});
+		  $( "#song_list" ).sortable({distance: 15,
+									   deactivate: function( event, ui )
+									   {
+											console.log($(this).sortable("deactivate"));
+										
+									   }
+									});
+		  
 		  $( "#song_list" ).disableSelection();
 		  
 		  $( ".slider-range" ).slider({
@@ -52,7 +61,6 @@
 					audio.currentTime = ui.values[0];
 				}
 			});
-		  
 		  
 		  $("#add_link_button").click(function(){
 				var file = $("#link_input")[0].files[0];
@@ -108,6 +116,12 @@
 						audio.values = ui.values;
 					}
 				});
+				
+				
+				$(".close_button").click(function(){
+					  var li = $(this).parents("li");
+					  li.fadeOut(300, function(){ $(this).remove()});
+				  });
 			});
 		  
 			
@@ -160,7 +174,6 @@
 			
 			function concat_buffers(buffer1, buffer2)
 			{
-				debugger;
 				var numberOfChannels = Math.min( buffer1.numberOfChannels, buffer2.numberOfChannels );
 				var tmp = audio_context.createBuffer( numberOfChannels, (buffer1.length + buffer2.length), buffer1.sampleRate );
 				for (var i=0; i<numberOfChannels; i++) {
@@ -198,12 +211,15 @@
 			
 				request.send();
 			}
-		  	
-			$("#preview_button").click(function(){
+			
+			function prepare_song()
+			{
 				buffers = new Array();
-				for (var i = 0; i < songs.length; i++)
+				var list_items = $("ul>li");
+				for (var i = 0; i < list_items.length; i++)
 				{
-					var song = songs[i];
+					song_index = list_items[i].id
+					var song = songs[song_index];
 					var start = song.values[0] * song.duration / 100;
 					var end = song.values[1] * song.duration / 100;
 					
@@ -216,7 +232,11 @@
 				{
 					final = concat_buffers(final, buffers[i]);
 				}
-				
+				return final;
+			}
+		  	
+			$("#preview_button").click(function(){
+				var final = prepare_song();
 				var audioSource = audio_context.createBufferSource();
 				audioSource.connect(audio_context.destination);
 				audioSource.buffer = final;
@@ -224,6 +244,15 @@
 				audioSource.playbackRate.value = 1;
 				console.log(final);
 				console.log("done");
+			});
+			
+			
+			$("#send_button").click(function(){
+				//debugger;
+				var final = prepare_song();
+				var wave = new RIFFWAVE(final);
+				var audio = new Audio(wave.dataURI);
+				audio.play();
 			});
 
 		  
@@ -248,32 +277,11 @@
 		
 		<ul id="song_list">
 			
-			<!--<li class="song_area" id="1">-->
-			<!--	<div class="sond_audio">-->
-			<!--		<audio class="audio_element">-->
-			<!--			<source src="media/crazy.mp3" type="audio/mpeg">-->
-			<!--			Your browser does not support the audio tag.-->
-			<!--		</audio>-->
-			<!--	</div>-->
-			<!--	-->
-			<!--	<div class="title_area">-->
-			<!--		<span class="song_title">Ninet Tayeb - Crazy</span>-->
-			<!--		<input type="image" src="img/play.png" class="play_pause_button" onclick="play_pressed();"/>-->
-			<!---->
-			<!--		<span class="close_button">X</span>-->
-			<!--	</div>-->
-			<!---->
-			<!--	<div class="controls">-->
-			<!--		<div class="slider-range"></div>-->
-			<!--	</div>-->
-			<!--	-->
-			<!--</li>-->
-			
 		</ul>
 		
 		<div id="global_controls">
 			<button id="preview_button">Preview</button>
-			<button>Send!</button>
+			<button id="send_button">Send!</button>
 		</div>
 	
 	</div>
