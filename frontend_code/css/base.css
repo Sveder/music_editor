@@ -13,7 +13,10 @@ body
 }
 
 
-
+.ui-slider-handle
+{
+    font-family: monospace;
+}
 
 #add_container
 {
