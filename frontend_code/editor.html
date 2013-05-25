@@ -1,0 +1,282 @@
+<!doctype html>
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+	<title>Trello2iCal - Creates an iCalendar feed from you Trello cards</title>
+	<meta name="description" content="">
+	<meta name="author" content="">
+
+	<meta name="viewport" content="width=device-width">
+	<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.6.1/jquery.min.js"></script>
+	<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.8.18/jquery-ui.min.js"></script>
+	<script src="js/jdataview.js"></script>
+	<script src="js/script.js"></script>
+	
+	<link rel="stylesheet" href="http://code.jquery.com/ui/1.10.3/themes/smoothness/jquery-ui.css">
+	<link rel="stylesheet" href="css/base.css">
+		
+		
+	<script>
+		var new_song_template = '<li class="song_area" id="%%song_id%%">\
+				\
+				<div class="title_area">\
+					<span class="song_title">%%song_title%%</span>\
+					<input type="image" src="img/play.png" class="play_pause_button" onclick="play_index(this, %%song_id%%);"/>\
+\
+					<span class="close_button">X</span>\
+				</div>\
+\
+				<div class="controls">\
+					<div class="slider_range_%%song_id%%"></div>\
+				</div>\
+				\
+			</li>';
+		
+		var songs = new Array();
+		var audio_context;
+		$(function() {
+			window.AudioContext = window.AudioContext || window.webkitAudioContext;
+			audio_context = new AudioContext();
+
+		  $( "#song_list" ).sortable({distance: 15});
+		  $( "#song_list" ).disableSelection();
+		  
+		  $( ".slider-range" ).slider({
+				range: true,
+				min: 0,
+				max: 242,
+				values: [ 0, 30 ],
+				slide: function( event, ui ) {
+					var audio = $(this).parents("li").find("audio")[0];
+					audio.currentTime = ui.values[0];
+				}
+			});
+		  
+		  
+		  $("#add_link_button").click(function(){
+				var file = $("#link_input")[0].files[0];
+				var song_title = file.name;
+
+				var reader = new FileReader();
+
+				reader.onload = function(e) {
+					var dv = new jDataView(this.result);
+	
+					// "TAG" starts at byte -128 from EOF.
+					// See http://en.wikipedia.org/wiki/ID3
+					if (dv.getString(3, dv.byteLength - 128) == 'TAG') {
+					  var title = dv.getString(30, dv.tell());
+					  var artist = dv.getString(30, dv.tell());
+					  var album = dv.getString(30, dv.tell());
+					  var year = dv.getString(4, dv.tell());
+					  song_title = artist + " - " + title;
+					} else {
+						console.log(":()");
+					  // no ID3v1 data found.
+					}
+				  };
+
+				reader.readAsArrayBuffer(file);
+				
+				var url = window.URL.createObjectURL(file);
+				
+				var song_id = songs.length;
+				
+				var audio_element = new Audio();
+				audio_element.src = url;
+				audio_element.values = [0, 20];
+				audio_element.file = file;
+				audio_element.file_url = url;
+				songs.push(audio_element);
+				
+				load_song(url, song_id);
+				
+				
+				
+				var filled = new_song_template.replace(/\%\%song_id\%\%/g, song_id).replace("%%song_title%%", song_title);
+				$("#song_list").append(filled);
+				
+				$( ".slider_range_" + song_id ).slider({
+					range: true,
+					min: 0,
+					max: 100,
+					values: [ 0, 20 ],
+					slide: function( event, ui ) {
+						var audio = songs[song_id];
+						audio.currentTime = ui.values[0] * audio.duration / 100;
+						audio.values = ui.values;
+					}
+				});
+			});
+		  
+			
+			//Buffer manipaluion, all times in seconds (as opposed to percent in the rest of app):
+			
+			function remove_start(buf, to)
+			{
+				var channel_count = buf.numberOfChannels;
+				var new_length = buf.length - (to) * buf.sampleRate;
+				var tmp = audio_context.createBuffer( channel_count, new_length , buf.sampleRate );
+				
+				for (var chan_index = 0; chan_index < channel_count; chan_index++)
+				{
+					var original_channel = buf.getChannelData(chan_index);
+					var channel = tmp.getChannelData(chan_index);
+					channel.set(original_channel.subarray(to * buf.sampleRate, new_length), 0)
+					
+				}
+				
+				return tmp;
+			}
+			
+			function remove_end(buf, from)
+			{
+				var channel_count = buf.numberOfChannels;
+				var new_length = from * buf.sampleRate;
+				
+				var tmp = audio_context.createBuffer( channel_count, new_length , buf.sampleRate );
+				
+				for (var chan_index = 0; chan_index < channel_count; chan_index++)
+				{
+					var original_channel = buf.getChannelData(chan_index);
+					var channel = tmp.getChannelData(chan_index);
+					channel.set(original_channel.subarray(0, new_length), 0)
+					
+				}
+				
+				return tmp;
+				
+			}
+			
+			
+			function splice(buf, start, end)
+			{
+				var new_buf = remove_start(buf, start);
+				new_buf = remove_end(new_buf, end - start);
+				return new_buf;
+			}
+			
+			
+			function concat_buffers(buffer1, buffer2)
+			{
+				debugger;
+				var numberOfChannels = Math.min( buffer1.numberOfChannels, buffer2.numberOfChannels );
+				var tmp = audio_context.createBuffer( numberOfChannels, (buffer1.length + buffer2.length), buffer1.sampleRate );
+				for (var i=0; i<numberOfChannels; i++) {
+				  var channel = tmp.getChannelData(i);
+				  channel.set( buffer1.getChannelData(i), 0);
+				  channel.set( buffer2.getChannelData(i), buffer1.length);
+				}
+				return tmp;
+			}
+			
+			
+			function load_song(url, index) {
+				var request = new XMLHttpRequest();
+			
+				request.open('GET', url, true);
+				request.responseType = 'arraybuffer';
+			
+				/**
+				 * Appends two ArrayBuffers into a new one.
+				 * 
+				 * @param {ArrayBuffer} data The ArrayBuffer that was loaded.
+				 */
+				function play(data) {
+				  //decode the loaded data
+				  audio_context.decodeAudioData(data, function(buf) {
+						songs[index].buffer = buf;
+				  });
+			
+				};
+			
+				// When the song is loaded asynchronously try to play it.
+				request.onload = function() {
+				  play(request.response);
+				}
+			
+				request.send();
+			}
+		  	
+			$("#preview_button").click(function(){
+				buffers = new Array();
+				for (var i = 0; i < songs.length; i++)
+				{
+					var song = songs[i];
+					var start = song.values[0] * song.duration / 100;
+					var end = song.values[1] * song.duration / 100;
+					
+					var trimmed_buf = splice(song.buffer, start, end);
+					buffers.push(trimmed_buf);
+				}
+				
+				var final = buffers[0];
+				for (i = 1; i < buffers.length; i++)
+				{
+					final = concat_buffers(final, buffers[i]);
+				}
+				
+				var audioSource = audio_context.createBufferSource();
+				audioSource.connect(audio_context.destination);
+				audioSource.buffer = final;
+				audioSource.noteOn(0);
+				audioSource.playbackRate.value = 1;
+				console.log(final);
+				console.log("done");
+			});
+
+		  
+		  
+		});
+		  
+  </script>
+	
+</head>
+
+<!--background="img/background.gif"-->
+<body>
+	<div id="container">
+		
+				
+		<div id="add_container">
+			<input type="file" id="link_input" />
+			<button id="add_link_button">Add</button>
+		</div>
+		
+		<br><br>
+		
+		<ul id="song_list">
+			
+			<!--<li class="song_area" id="1">-->
+			<!--	<div class="sond_audio">-->
+			<!--		<audio class="audio_element">-->
+			<!--			<source src="media/crazy.mp3" type="audio/mpeg">-->
+			<!--			Your browser does not support the audio tag.-->
+			<!--		</audio>-->
+			<!--	</div>-->
+			<!--	-->
+			<!--	<div class="title_area">-->
+			<!--		<span class="song_title">Ninet Tayeb - Crazy</span>-->
+			<!--		<input type="image" src="img/play.png" class="play_pause_button" onclick="play_pressed();"/>-->
+			<!---->
+			<!--		<span class="close_button">X</span>-->
+			<!--	</div>-->
+			<!---->
+			<!--	<div class="controls">-->
+			<!--		<div class="slider-range"></div>-->
+			<!--	</div>-->
+			<!--	-->
+			<!--</li>-->
+			
+		</ul>
+		
+		<div id="global_controls">
+			<button id="preview_button">Preview</button>
+			<button>Send!</button>
+		</div>
+	
+	</div>
+</body>
+
+</html>
